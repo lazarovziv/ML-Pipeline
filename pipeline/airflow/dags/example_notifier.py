@@ -11,7 +11,7 @@ with DAG(
     schedule_interval=None,
     on_success_callback=ExampleNotifier('Success!'),
     on_failure_callback=ExampleNotifier('Failure!')
-):
+) as dag:
     task0 = BashOperator(
         task_id='example_task0',
         bash_command='exit 1',
@@ -23,3 +23,5 @@ with DAG(
         bash_command='echo Hello $name!',
         env={ 'name': 'Person' }
     )
+
+    task0 >> task1
