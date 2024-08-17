@@ -13,7 +13,8 @@ import pendulum
     schedule_interval='0 0 * * *',
     start_date=pendulum.datetime(2021, 1, 1, tz='UTC'),
     catchup=True,
-    dagrun_timeout=datetime.timedelta(minutes=60)
+    dagrun_timeout=datetime.timedelta(minutes=60),
+    tags=['employees_table', 'employees']
 )
 
 def ProcessEmployees():
