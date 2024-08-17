@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver-loadbalancer
+  annotations:
+    service.beta.kubernetes.io/tolerate-unready-endpoints: "true"
+spec:
+  selector:
+    component: webserver
+    release: airflow
+    tier: airflow
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: LoadBalancer
+  externalTrafficPolicy: local
+  externalIPs:
+  - apps.zivlazarov.com/airflow
+  externalEndpoints:
+  - serviceName: airflow-webserver
+    servicePort: 8080
