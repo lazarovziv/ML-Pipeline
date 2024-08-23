@@ -23,7 +23,7 @@ with DAG(
 ) as dag:
     task0 = BashOperator(
         task_id='example_task0',
-        bash_command='exit 1',
+        bash_command='exit 0',
         on_success_callback=ExampleNotifier('Task Succeeded!')
     )
 
