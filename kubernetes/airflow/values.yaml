@@ -1,0 +1,39 @@
+executor: "KubernetesExecutor"
+
+workers:
+  persistence:
+    storageClassName: local-path
+
+createUserJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+
+migrateDatabaseJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+
+triggerer:
+  persistence:
+    storageClassName: local-path
+
+redis:
+  persistence:
+    storageClassName: local-path
+
+dags:
+  persistence:
+    storageClassName: local-path
+    accessMode: ReadWriteMany
+  gitSync:
+    enabled: true
+    repo: https://github.com/lazarovziv/ML-Pipeline.git
+    branch: main
+    rev: HEAD
+    ref: main
+    subPath: "pipeline/airflow/dags"
+    credentialsSecret: git-credentials
+
+logs:
+  persistence:
+    size: 10Gi
+    storageClassName: local-path
