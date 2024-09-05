@@ -21,7 +21,7 @@ def ProcessEmployees():
 
     create_employee_table = PostgresOperator(
         task_id='create_employees_table',
-        postgres_conn_id='tutorial_pg_conn',
+        # postgres_conn_id='postgres_default',
         # can also specify path to .sql file
         sql='''
         CREATE TABLE IF NOT EXISTS employees (
@@ -36,7 +36,7 @@ def ProcessEmployees():
 
     create_employee_temp_table = PostgresOperator(
         task_id='create_employees_temp_table',
-        postgres_conn_id='tutorial_pg_conn',
+        # postgres_conn_id='postgres_default',
         sql='''
             DROP TABLE IF EXISTS employees_temp;
             CREATE TABLE emplpyees_temp (
