@@ -37,3 +37,7 @@ logs:
   persistence:
     size: 10Gi
     storageClassName: local-path
+
+webserver:
+  service:
+    type: NodePort
