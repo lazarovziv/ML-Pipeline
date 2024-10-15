@@ -2,3 +2,4 @@ secret*
 *.txt
 *.xml
 *.iml
+.env
