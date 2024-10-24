@@ -34,6 +34,16 @@ def init_tables():
     cursor.close()
     connection.close()
 
+def execute_query(db_conn, cursor, query):
+    cursor.execute(query)
+    result = cursor.fetchall()[0]
+
+    db_conn.commit()
+    cursor.close()
+    db_conn.close()
+
+    return result
+
 
 def report_optuna_study(study, db_conn):
     study_distributions = study.get_trials(deepcopy=False)[0].distributions
@@ -132,7 +142,6 @@ def report_optuna_trial(study, trial):
 
     trial_id = trial.number
     trial_state = "'COMPLETED'" if trial.state == 1 else "'PRUNED'"
-    study_step = trial.last_step
     trial_encoded_dim = trial.params['encoded_dim']
     trial_initial_out_channels = trial.params['initial_out_channels']
     trial_learning_rate = trial.params['lr']
@@ -144,14 +153,26 @@ def report_optuna_trial(study, trial):
     trial_epochs = trial.params['epochs']
     trial_batch_size = trial.params['batch_size']
     trial_loss_function_id = trial.params['loss_idx']
-    trial_loss_value = trial.value if trial.value is not None else -1.0
+    if trial.values:
+        if len(trial.values) == 1:
+            trial_overall_loss_value = trial.values[0]
+            trial_kl_divergence_loss_value = -1.0
+            trial_loss_value = -1.0
+        else:
+            trial_kl_divergence_loss_value = trial.values[0] if trial.values is not None else -1.0
+            trial_loss_value = trial.values[1] if trial.values is not None else -1.0
+        if trial_kl_divergence_loss_value != -1.0 and trial_loss_value != -1.0:
+            trial_overall_loss_value = trial_loss_value + trial_kl_divergence_lambda * trial_kl_divergence_loss_value
+    else:
+        trial_overall_loss_value = -1.0
+        trial_kl_divergence_loss_value = -1.0
+        trial_loss_value = -1.0
 
     insert_query = f'''
     INSERT INTO optuna_trial(
         study_id,
         trial_id,
         state,
-        study_step,
         encoded_dim,
         initial_out_channels,
         learning_rate,
@@ -163,12 +184,13 @@ def report_optuna_trial(study, trial):
         epochs,
         batch_size,
         loss_function_id,
+        overall_loss_value,
+        kl_divergence_loss_value,
         loss_value
     ) VALUES (
         {study_id},
         {trial_id},
         {trial_state},
-        {study_step},
         {trial_encoded_dim},
         {trial_initial_out_channels},
         {trial_learning_rate},
@@ -180,6 +202,8 @@ def report_optuna_trial(study, trial):
         {trial_epochs},
         {trial_batch_size},
         {trial_loss_function_id},
+        {trial_overall_loss_value},
+        {trial_kl_divergence_loss_value},
         {trial_loss_value}
     );
     '''
@@ -191,35 +215,30 @@ def report_optuna_trial(study, trial):
     db_conn.close()
 
 
-def report_study_best_loss_value():
+def report_study_best_loss_value(dataset_size):
     db_conn = init_db_connection()
     cursor = db_conn.cursor()
 
     get_min_loss_value_in_last_study_query = '''
-        SELECT study_id, loss_value
-        FROM optuna_trial AS outer_table
-        WHERE study_id = (
-            SELECT MAX(inner_table.study_id)
-            FROM optuna_trial AS inner_table
-        ) AND
-            outer_table.loss_value != -1 AND
-            outer_table.loss_value IN (
-                SELECT MIN(inner_table.loss_value)
-                FROM optuna_trial AS inner_table
-                WHERE inner_table.study_id = outer_table.study_id
-                GROUP BY inner_table.loss_value
-            ) AND
-            outer_table.state != 'PRUNED'
-        ORDER BY outer_table.loss_value ASC
+        SELECT study_id, overall_loss_value, kl_divergence_loss_value, loss_value
+        FROM optuna_trial
+        WHERE overall_loss_value != -1 AND
+            study_id = (SELECT MAX(inr.study_id)
+                        FROM optuna_study AS inr)
+        GROUP BY study_id, trial_id, loss_value, kl_divergence_loss_value, overall_loss_value
+        ORDER BY overall_loss_value ASC
         LIMIT 1;
     '''
 
     cursor.execute(get_min_loss_value_in_last_study_query)
-    study_id, best_loss_value = cursor.fetchall()[0]
+    study_id, best_overall_loss_value, best_kl_divergence_loss_value, best_loss_value = cursor.fetchall()[0]
 
     update_best_loss_value_query = f'''
         UPDATE optuna_study
-        SET best_loss_value = {best_loss_value}
+        SET best_overall_loss_value = {best_overall_loss_value},
+            best_loss_value = {best_loss_value},
+            best_kl_divergence_loss_value = {best_kl_divergence_loss_value},
+            dataset_size = {dataset_size}
         WHERE study_id = {study_id};
     '''
     cursor.execute(update_best_loss_value_query)
@@ -227,3 +246,28 @@ def report_study_best_loss_value():
     db_conn.commit()
     cursor.close()
     db_conn.close()
+
+
+def get_best_hyperparameters():
+    db_conn = init_db_connection()
+    cursor = db_conn.cursor()
+
+    select_best_hyperparameters_query = '''
+        SELECT encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum, dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size
+        FROM optuna_trial
+        WHERE overall_loss_value = (
+            SELECT MIN(inr.overall_loss_value)
+            FROM optuna_trial AS inr
+            WHERE inr.overall_loss_value != -1 AND
+                inr.state != 'PRUNED' AND
+                inr.loss_function_id = 0
+            );
+    '''
+    cursor.execute(select_best_hyperparameters_query)
+    encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum, dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size = cursor.fetchall()[0]
+
+    db_conn.commit()
+    cursor.close()
+    db_conn.close()
+
+    return encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum, dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size
