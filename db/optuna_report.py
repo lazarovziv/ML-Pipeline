@@ -4,13 +4,16 @@ import psycopg2
 
 
 def init_db_connection():
+    if not os.path.exists('./.env'):
+        raise IOError('.env file doesn\'t exist. Can\'t initialize connection to the database!')
+
     # setting environment variables from .env file
-    if os.path.exists('./.env'):
-        with open('./.env', 'r') as f:
-            lines = f.read().splitlines()
-            for line in lines:
-                key, value = line.split('=')
-                os.environ[key] = value
+    with open('./.env', 'r') as f:
+        lines = f.read().splitlines()
+        for line in lines:
+            key, value = line.split('=')
+            os.environ[key] = value
+
     db_conn = psycopg2.connect(
         user=os.environ['POSTGRES_USERNAME'],
         password=os.environ['POSTGRES_PASSWORD'],
@@ -154,15 +157,18 @@ def report_optuna_trial(study, trial):
     trial_batch_size = trial.params['batch_size']
     trial_loss_function_id = trial.params['loss_idx']
     if trial.values:
+        # if a single objective optimization function
         if len(trial.values) == 1:
             trial_overall_loss_value = trial.values[0]
             trial_kl_divergence_loss_value = -1.0
             trial_loss_value = -1.0
+        # multi objective
         else:
             trial_kl_divergence_loss_value = trial.values[0] if trial.values is not None else -1.0
             trial_loss_value = trial.values[1] if trial.values is not None else -1.0
         if trial_kl_divergence_loss_value != -1.0 and trial_loss_value != -1.0:
             trial_overall_loss_value = trial_loss_value + trial_kl_divergence_lambda * trial_kl_divergence_loss_value
+    # default values (NOT NULL)
     else:
         trial_overall_loss_value = -1.0
         trial_kl_divergence_loss_value = -1.0
@@ -220,14 +226,15 @@ def report_study_best_loss_value(dataset_size):
     cursor = db_conn.cursor()
 
     get_min_loss_value_in_last_study_query = '''
-        SELECT study_id, overall_loss_value, kl_divergence_loss_value, loss_value
-        FROM optuna_trial
-        WHERE overall_loss_value != -1 AND
-            study_id = (SELECT MAX(inr.study_id)
-                        FROM optuna_study AS inr)
-        GROUP BY study_id, trial_id, loss_value, kl_divergence_loss_value, overall_loss_value
-        ORDER BY overall_loss_value ASC
-        LIMIT 1;
+    SELECT study_id, overall_loss_value, kl_divergence_loss_value, loss_value
+    FROM optuna_trial AS outr
+    WHERE overall_loss_value != -1
+    AND study_id = (SELECT MAX(inr.study_id)
+                    FROM optuna_study AS inr)
+    AND overall_loss_value = (SELECT MIN(inr.overall_loss_value)
+                                FROM optuna_trial AS inr
+                                WHERE inr.study_id = outr.study_id
+                                AND inr.overall_loss_value != -1)
     '''
 
     cursor.execute(get_min_loss_value_in_last_study_query)
