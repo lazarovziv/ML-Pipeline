@@ -1,7 +1,17 @@
 import os
-
+import asyncio
 import psycopg2
 
+
+class DatabaseConnectionException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
+
+class MissingQueryParameterException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
 
 def init_db_connection():
     if not os.path.exists('./.env'):
@@ -14,29 +24,34 @@ def init_db_connection():
             key, value = line.split('=')
             os.environ[key] = value
 
-    db_conn = psycopg2.connect(
-        user=os.environ['POSTGRES_USERNAME'],
-        password=os.environ['POSTGRES_PASSWORD'],
-        host=os.environ['POSTGRES_HOST'],
-        port=os.environ['POSTGRES_PORT'],
-        database=os.environ['POSTGRES_DB']
-    )
+    try:
+        db_conn = psycopg2.connect(
+            user=os.environ['POSTGRES_USERNAME'],
+            password=os.environ['POSTGRES_PASSWORD'],
+            host=os.environ['POSTGRES_HOST'],
+            port=os.environ['POSTGRES_PORT'],
+            database=os.environ['POSTGRES_DB']
+        )
 
-    return db_conn
+        return db_conn
+    except Exception as e:
+        raise DatabaseConnectionException(str(e))
 
 
 def init_tables():
-    connection = init_db_connection()
+    try:
+        connection = init_db_connection()
 
-    cursor = connection.cursor()
-    # read the queries from the .sql file
-    with open('./db/sql/create_tables.sql', 'r') as f:
-        cursor.execute(f.read())
+        cursor = connection.cursor()
+        # read the queries from the .sql file
+        with open('./db/sql/create_tables.sql', 'r') as f:
+            cursor.execute(f.read())
 
-    connection.commit()
-    cursor.close()
-    connection.close()
-
+        connection.commit()
+        cursor.close()
+        connection.close()
+    except DatabaseConnectionException as e:
+        print(f'{e} - Can\'t connect to the database! No tables will be created...')
 def execute_query(db_conn, cursor, query):
     cursor.execute(query)
     result = cursor.fetchall()[0]
@@ -254,27 +269,86 @@ def report_study_best_loss_value(dataset_size):
     cursor.close()
     db_conn.close()
 
+    return study_id
 
-def get_best_hyperparameters():
+
+def get_best_hyperparameters(from_last_study=False):
     db_conn = init_db_connection()
     cursor = db_conn.cursor()
 
-    select_best_hyperparameters_query = '''
-        SELECT encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum, dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size
-        FROM optuna_trial
-        WHERE overall_loss_value = (
-            SELECT MIN(inr.overall_loss_value)
-            FROM optuna_trial AS inr
-            WHERE inr.overall_loss_value != -1 AND
-                inr.state != 'PRUNED' AND
-                inr.loss_function_id = 0
-            );
+    if from_last_study:
+        condition = '''
+        study_id = (SELECT MAX(inr.study_id)
+                    FROM optuna_study AS inr)
+        AND overall_loss_value = (SELECT MIN(inr.overall_loss_value)
+                                    FROM optuna_trial AS inr
+                                    WHERE inr.study_id = outr.study_id
+                                    AND inr.overall_loss_value != -1)
+        '''
+    else:
+        condition = '''
+            overall_loss_value = (
+                SELECT MIN(inr.overall_loss_value)
+                FROM optuna_trial AS inr
+                WHERE inr.overall_loss_value != -1 AND
+                    inr.state != 'PRUNED' AND
+                    inr.loss_function_id = 0
+            )
+        '''
+
+    select_best_hyperparameters_query = f'''
+        SELECT encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum,
+                dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size
+        FROM optuna_trial AS outr
+        WHERE {condition};
     '''
     cursor.execute(select_best_hyperparameters_query)
-    encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum, dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size = cursor.fetchall()[0]
+    (encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum,
+     dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size) = cursor.fetchall()[0]
 
     db_conn.commit()
     cursor.close()
     db_conn.close()
 
-    return encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum, dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size
+    return (encoded_dim, initial_out_channels, learning_rate, weight_decay, momentum,
+            dampening, scheduler_gamma, kl_divergence_lambda, epochs, batch_size)
+
+def insert_images(data_dir, study_id=None):
+    if study_id is None:
+        raise MissingQueryParameterException('Missing study_id parameter!')
+
+    from tqdm import tqdm
+
+    db_conn = init_db_connection()
+    cursor = db_conn.cursor()
+
+    classes = os.listdir(data_dir)
+    for class_idx in tqdm(range(len(classes))):
+        class_directory_path = f'{data_dir}/{classes[class_idx]}'
+        class_images_file_names = os.listdir(class_directory_path)
+        for image_file_name in class_images_file_names:
+            try:
+                with open(f'{class_directory_path}/{image_file_name}', 'rb') as image_file:
+                    binary_data_image = image_file.read()
+                cursor.execute('''
+                    INSERT INTO images (file_name, class_id, image_bytes, study_id)
+                    VALUES (%s, %s, %s, %s)
+                ''', (f'{class_directory_path}/{image_file_name}', class_idx, psycopg2.Binary(binary_data_image), study_id)
+                )
+            except Exception as e:
+                print(f'Exception {e} was raised with file {image_file_name}')
+
+    db_conn.commit()
+    cursor.close()
+    db_conn.close()
+
+import asyncio
+
+async def insert_images_async(data_dir, study_id):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, insert_images, data_dir, study_id)
+
+async def execute_insert_images(data_dir, study_id=None):
+    task = asyncio.create_task(insert_images_async(data_dir, study_id))
+    # returning task's result
+    return asyncio.gather(task)

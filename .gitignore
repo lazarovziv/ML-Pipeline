@@ -1,5 +1,15 @@
+# files
 secret*
 *.txt
 *.xml
 *.iml
 .env
+# directories
+data/
+.idea/
+.ipynb_checkpoints/
+.vscode/
+runs/
+saved_models/
+logs/
+db/__pycache__/
