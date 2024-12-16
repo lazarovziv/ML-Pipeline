@@ -388,8 +388,9 @@ class ConvClassifier(nn.Module):
         
         self.num_blocks = num_blocks
         self.blocks = [self.block(train_params['encoded_dim'], 256)]
-        for _ in range(self.num_blocks - 2):
-            self.blocks.extend(self.block(256, 256))
+        for i in range(self.num_blocks - 2):
+            dropout_rate = 0.25 if i % 2 == 0 else 0
+            self.blocks.extend(self.block(256, 256, dropout_rate=dropout_rate))
         self.blocks.extend(self.block(256, 64))
         
         self.block_modules = nn.ModuleList(self.blocks)
@@ -405,12 +406,13 @@ class ConvClassifier(nn.Module):
 
         self.log_softmax = nn.LogSoftmax(dim=1)
 
-    def block(self, in_dim, out_dim):
+    def block(self, in_dim, out_dim, dropout_rate=0):
         return nn.Sequential(
             # setting bias to False since BatchNorm has one
             nn.Linear(in_dim, out_dim, bias=False),
             nn.BatchNorm1d(out_dim),
-            nn.ReLU()
+            nn.ReLU(),
+            # nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
         )
 
     def forward(self, X):
