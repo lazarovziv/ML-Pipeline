@@ -32,13 +32,13 @@ class MaxUnPoolBlock(nn.Module):
         return x
     
 class ConvEncoder(nn.Module):
-    def __init__(self, in_channels, encoded_dim, initial_out_channels=3, device='cpu'):
+    def __init__(self, in_channels, encoded_dim, pooling_type, initial_out_channels=3, relu_slope=0, device='cpu'):
         super().__init__()
         
         self.device = device
         
         # non parameterized functionality
-        self.relu = nn.ReLU()
+        self.relu = nn.ReLU() # nn.LeakyReLU(relu_slope)
         self.flatten = nn.Flatten()
         
         out_channels = initial_out_channels
@@ -61,7 +61,8 @@ class ConvEncoder(nn.Module):
             out_channels=out_channels,
             kernel_size=(3, 3),
             padding=1,
-            stride=1
+            stride=1,
+            pooling_type=pooling_type
         )
         # using this "block" to be able to return max_indices from the max pool layer
         self.max_pool_block0 = MaxPoolBlock(
@@ -86,7 +87,8 @@ class ConvEncoder(nn.Module):
             out_channels=out_channels,
             kernel_size=(3, 3),
             padding=1,
-            stride=1
+            stride=1,
+            pooling_type=pooling_type
         )
         self.max_pool_block1 = MaxPoolBlock(
             out_channels=out_channels,
@@ -109,7 +111,8 @@ class ConvEncoder(nn.Module):
             out_channels=out_channels,
             kernel_size=(3, 3),
             padding=1,
-            stride=1
+            stride=1,
+            pooling_type=pooling_type
         )
         self.max_pool_block2 = MaxPoolBlock(
             out_channels=out_channels,
@@ -134,13 +137,16 @@ class ConvEncoder(nn.Module):
         
         self.final_out_channels = out_channels
         
-    def res_block(self, out_channels, kernel_size, padding, stride):
+    def res_block(self, out_channels, kernel_size, padding, stride, pooling_type):
+        pooling_layer = nn.MaxPool2d(kernel_size=kernel_size, padding=padding, stride=stride) \
+            if pooling_type == 'max' else nn.AvgPool2d(kernel_size=kernel_size, padding=padding, stride=stride)
+        
         return nn.Sequential(
             # bias is false as we have a bias in the BN layer
             nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride, bias=False),
             nn.BatchNorm2d(out_channels),
             self.relu,
-            nn.MaxPool2d(kernel_size=kernel_size, padding=padding, stride=stride),
+            pooling_layer,
             nn.BatchNorm2d(out_channels),
         )
     
@@ -188,13 +194,13 @@ class ConvEncoder(nn.Module):
     
 
 class ConvDecoder(nn.Module):
-    def __init__(self, encoded_dim, initial_out_channels, encoder_initial_out_channels):
+    def __init__(self, encoded_dim, initial_out_channels, encoder_initial_out_channels, relu_slope=0):
         super().__init__()
         
         self.initial_out_channels = initial_out_channels
         out_channels = initial_out_channels
         
-        self.relu = nn.ReLU()
+        self.relu = nn.ReLU() # nn.LeakyReLU(relu_slope)
         self.sigmoid = nn.Sigmoid()
         self.zero_padding = nn.ZeroPad2d(2)
         
@@ -337,14 +343,17 @@ def kl_divergence_loss(mean, log_var):
     return -0.5 * kl_sum.mean(dim=0)
 
 class ConvAutoEncoder(nn.Module):
-    def __init__(self, in_channels, encoded_dim, initial_out_channels, device):
+    def __init__(self, in_channels, encoded_dim, initial_out_channels, relu_slope, device, pooling_type='max'):
         super().__init__()
+
+        self.device = device
         # latent space is encoded_dim dimensions
         self.encoder = ConvEncoder(in_channels=in_channels, encoded_dim=encoded_dim,
-                                   initial_out_channels=initial_out_channels, device=device)
+                                   initial_out_channels=initial_out_channels,
+                                   pooling_type=pooling_type, relu_slope=relu_slope, device=device)
         self.decoder = ConvDecoder(encoded_dim=encoded_dim,
                                    initial_out_channels=self.encoder.final_out_channels,
-                                   encoder_initial_out_channels=initial_out_channels)
+                                   encoder_initial_out_channels=initial_out_channels, relu_slope=relu_slope)
 
     def forward(self, X):
         encoded, encoded_mean, encoded_log_var, max_indices = self.encoder(X)
@@ -356,17 +365,17 @@ class ConvAutoEncoder(nn.Module):
         # decoded = decoded - torch.tensor()
         
         return encoded, encoded_mean, encoded_log_var, decoded
-    
+
     def laplace_filtered(self, X):
         pass
 
 class ConvClassifier(nn.Module):
-    def __init__(self, train_params, num_classes, num_blocks=2, device='cpu'):
+    def __init__(self, train_params, num_classes, pooling_type='max', num_blocks=2, relu_slope=0, device='cpu'):
         super().__init__()
 
         autoencoder = ConvAutoEncoder(in_channels=1, encoded_dim=train_params['encoded_dim'],
                                     initial_out_channels=train_params['initial_out_channels'],
-                                    device=device)
+                                    pooling_type=pooling_type, relu_slope=relu_slope, device=device)
         autoencoder.load_state_dict(load_model(train_params))
         autoencoder.train()
 
@@ -386,6 +395,9 @@ class ConvClassifier(nn.Module):
         self.block_modules = nn.ModuleList(self.blocks)
         self.seq_output = nn.Linear(64, num_classes)
 
+        self.bn = nn.BatchNorm1d(train_params['encoded_dim'])
+        # relu_slope = 0 is the same as regular relu
+        self.relu = nn.ReLU() # nn.LeakyReLU(relu_slope)
         # self.seq_block0 = self.block(train_params['encoded_dim'], 256)
         # self.seq_block1 = self.block(256, 256)
         # self.seq_block2 = self.block(256, 64)
@@ -403,6 +415,9 @@ class ConvClassifier(nn.Module):
 
     def forward(self, X):
         Y = self.encoder(X)[0]
+        Y = self.bn(Y)
+        Y = self.relu(Y)
+
         for block in self.block_modules:
             Y = block(Y)
         # Y = self.seq_block0(Y)

@@ -44,7 +44,7 @@ def init_tables():
 
         cursor = connection.cursor()
         # read the queries from the .sql file
-        with open('./db/sql/create_tables.sql', 'r') as f:
+        with open('./modules/db/sql/create_tables.sql', 'r') as f:
             cursor.execute(f.read())
 
         connection.commit()
@@ -52,14 +52,6 @@ def init_tables():
         connection.close()
     except DatabaseConnectionException as e:
         print(f'{e} - Can\'t connect to the database! No tables will be created...')
-
-async def execute_func_async(func, *args):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, func, *args)
-
-async def execute_async(func, *args):
-    task = asyncio.create_task(execute_func_async(func, *args))
-    return asyncio.gather(task)
 
 def execute_query(db_conn, cursor, query):
     cursor.execute(query)
@@ -95,6 +87,14 @@ def report_optuna_study(study, db_conn):
     epochs_max = study_distributions['epochs'].high
     batch_size_min = study_distributions['batch_size'].low
     batch_size_max = study_distributions['batch_size'].high
+    beta1_min = study_distributions['beta1'].low   
+    beta1_max = study_distributions['beta1'].high
+    beta2_min =study_distributions['beta2'].low
+    beta2_max = study_distributions['beta2'].high
+    optimizer_idx_min = study_distributions['optimizer_idx'].low
+    optimizer_idx_max = study_distributions['optimizer_idx'].high
+    relu_slope_min = study_distributions['relu_slope'].low
+    relu_slope_max = study_distributions['relu_slope'].high
 
     insert_study_query = f'''
     INSERT INTO optuna_study(
@@ -117,7 +117,15 @@ def report_optuna_study(study, db_conn):
         epochs_min,
         epochs_max,
         batch_size_min,
-        batch_size_max
+        batch_size_max,
+        beta1_min,
+        beta1_max,
+        beta2_min,
+        beta2_max,
+        optimizer_idx_min,
+        optimizer_idx_max,
+        relu_slope_min,
+        relu_slope_max
     ) VALUES(
         {encoded_dim_min},
         {encoded_dim_max},
@@ -138,7 +146,15 @@ def report_optuna_study(study, db_conn):
         {epochs_min},
         {epochs_max},
         {batch_size_min},
-        {batch_size_max}
+        {batch_size_max},
+        {beta1_min},
+        {beta1_max},
+        {beta2_min},
+        {beta2_max},
+        {optimizer_idx_min},
+        {optimizer_idx_max},
+        {relu_slope_min},
+        {relu_slope_max}
     );
     '''
 
@@ -148,10 +164,7 @@ def report_optuna_study(study, db_conn):
     db_conn.commit()
     cursor.close()
 
-async def report_optuna_study_async(study, db_conn):
-    return execute_async(report_optuna_study, study, db_conn)
-
-async def report_optuna_trial(study, trial):
+def report_optuna_trial(study, trial):
     db_conn = init_db_connection()
 
     cursor = db_conn.cursor()
@@ -185,6 +198,8 @@ async def report_optuna_trial(study, trial):
     trial_epochs = trial.params['epochs']
     trial_batch_size = trial.params['batch_size']
     trial_loss_function_id = trial.params['loss_idx']
+    trial_relu_slope = trial.params['relu_slope']
+    
     if trial.values:
         # if a single objective optimization function
         if len(trial.values) == 1:
@@ -222,6 +237,7 @@ async def report_optuna_trial(study, trial):
         epochs,
         batch_size,
         loss_function_id,
+        relu_slope,
         overall_loss_value,
         kl_divergence_loss_value,
         loss_value
@@ -243,6 +259,7 @@ async def report_optuna_trial(study, trial):
         {trial_epochs},
         {trial_batch_size},
         {trial_loss_function_id},
+        {trial_relu_slope},
         {trial_overall_loss_value},
         {trial_kl_divergence_loss_value},
         {trial_loss_value}
@@ -255,10 +272,7 @@ async def report_optuna_trial(study, trial):
     cursor.close()
     db_conn.close()
 
-async def report_optuna_trial_async(study, trial):
-    return execute_async(report_optuna_trial, study, trial)
-
-async def report_study_best_loss_value(dataset_size):
+def report_study_best_loss_value(dataset_size):
     db_conn = init_db_connection()
     cursor = db_conn.cursor()
 
@@ -293,9 +307,6 @@ async def report_study_best_loss_value(dataset_size):
 
     return study_id
 
-async def report_study_best_loss_value_async(dataset_size):
-    return execute_async(report_study_best_loss_value, dataset_size)
-
 def get_best_hyperparameters(from_last_study=False):
     db_conn = init_db_connection()
     cursor = db_conn.cursor()
@@ -322,49 +333,32 @@ def get_best_hyperparameters(from_last_study=False):
 
     select_best_hyperparameters_query = f'''
         SELECT encoded_dim, initial_out_channels, learning_rate, weight_decay, beta1, beta2, momentum,
-                dampening, optimizer_idx, scheduler_gamma, kl_divergence_lambda, epochs, batch_size
+                dampening, optimizer_idx, scheduler_gamma, kl_divergence_lambda, epochs, batch_size, relu_slope
         FROM optuna_trial AS outr
         WHERE {condition};
     '''
     cursor.execute(select_best_hyperparameters_query)
     (encoded_dim, initial_out_channels, learning_rate, weight_decay, beta1, beta2, momentum,
-     dampening, optimizer_idx, scheduler_gamma, kl_divergence_lambda, epochs, batch_size) = cursor.fetchall()[0]
+     dampening, optimizer_idx, scheduler_gamma, kl_divergence_lambda, epochs, batch_size, relu_slope) = cursor.fetchall()[0]
 
     db_conn.commit()
     cursor.close()
     db_conn.close()
 
     return (encoded_dim, initial_out_channels, learning_rate, weight_decay, (beta1, beta2), momentum,
-            dampening, optimizer_idx, scheduler_gamma, kl_divergence_lambda, epochs, batch_size)
+            dampening, optimizer_idx, scheduler_gamma, kl_divergence_lambda, epochs, batch_size, relu_slope)
 
-def insert_images(data_dir, study_id=None):
-    if study_id is None:
-        raise MissingQueryParameterException('Missing study_id parameter!')
-
-    from tqdm import tqdm
-
+def get_last_study_id():
     db_conn = init_db_connection()
     cursor = db_conn.cursor()
 
-    classes = os.listdir(data_dir)
-    for class_idx in tqdm(range(len(classes))):
-        class_directory_path = f'{data_dir}/{classes[class_idx]}'
-        class_images_file_names = os.listdir(class_directory_path)
-        for image_file_name in class_images_file_names:
-            try:
-                with open(f'{class_directory_path}/{image_file_name}', 'rb') as image_file:
-                    binary_data_image = image_file.read()
-                cursor.execute('''
-                    INSERT INTO images (file_name, class_id, image_bytes, study_id)
-                    VALUES (%s, %s, %s, %s)
-                ''', (f'{class_directory_path}/{image_file_name}', class_idx, psycopg2.Binary(binary_data_image), study_id)
-                )
-            except Exception as e:
-                print(f'Exception {e} was raised with file {image_file_name}')
+    query = 'SELECT MAX(study_id) FROM optuna_study;'
 
+    cursor.execute(query)
+    result = cursor.fetchall()[0][0]
+    
     db_conn.commit()
     cursor.close()
     db_conn.close()
 
-async def insert_images_async(data_dir, study_id):
-    return execute_async(insert_images, data_dir, study_id)
+    return result
