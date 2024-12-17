@@ -1,0 +1,55 @@
+from pydantic import BaseModel
+
+class TrialRequest(BaseModel):
+    study_id: int
+    id: int
+    state: str
+    encoded_dim: int
+    initial_out_channels: int
+    learning_rate: float
+    weight_decay: float
+    beta1: float
+    beta2: float
+    momentum: float
+    dampening: float
+    optimizer_idx: int
+    scheduler_gamma: float
+    kl_divergence_lambda: float
+    epochs: int
+    batch_size: int
+    loss_function_id: int
+    overall_loss_value: float
+    kl_divergence_loss_value: float
+    loss_value: float
+    relu_slope: float
+
+class StudyRequest(BaseModel):
+    encoded_dim_min: int
+    encoded_dim_max: int
+    initial_out_channels_min: int
+    initial_out_channels_max: int
+    learning_rate_min: float
+    learning_rate_max: float
+    weight_decay_min: float
+    weight_decay_max: float
+    beta1_min: float
+    beta1_max: float
+    beta2_min: float
+    beta2_max: float
+    momentum_min: float
+    momentum_max: float
+    dampening_min: float
+    dampening_max: float
+    optimizer_idx_min: int
+    optimizer_idx_max: int
+    scheduler_gamma_min: float
+    scheduler_gamma_max: float
+    kl_divergence_lambda_min: float
+    kl_divergence_lambda_max: float
+    epochs_min: int
+    epochs_max: int
+    batch_size_min: int
+    batch_size_max: int
+    dataset_size: int
+    relu_slope_min: float
+    relu_slope_max: float
