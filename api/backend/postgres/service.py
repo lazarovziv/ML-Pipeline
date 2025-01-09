@@ -4,6 +4,10 @@ from typing import Union
 
 import asyncio
 import psycopg2
+# for returning a dictionary from the query that'll be returned as a json
+from psycopg2.extras import RealDictCursor
+
+import json
 
 from .models.models import TrialRequest, StudyRequest
 from .models.exceptions import DatabaseConnectionException, MissingQueryParameterException
@@ -25,8 +29,19 @@ class PostgresService():
         self.db_host = os.environ['POSTGRES_HOST']
         self.db_port = os.environ['POSTGRES_PORT']
         self.db_name = os.environ['POSTGRES_DB']
-        
 
+        try:
+            db_conn = self.create_db_connection()
+            # read the queries from the .sql file
+            with open('./postgres/models/sql/create_tables.sql', 'r') as f:
+                init_query = f.read()
+        except DatabaseConnectionException as e:
+            print(str(e))
+            return
+        
+        loop = asyncio.get_event_loop()
+        loop.create_task(self.execute_query(init_query, db_conn))
+        
     def create_db_connection(self):
         try:
             db_conn = psycopg2.connect(
@@ -45,7 +60,7 @@ class PostgresService():
 
     async def execute_query(self, query, db_conn, return_query_result=False):
         try:
-            cursor = db_conn.cursor()
+            cursor = db_conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(query)
             if return_query_result:
                 result = cursor.fetchall()
@@ -56,6 +71,7 @@ class PostgresService():
             return 500
             
         if return_query_result:
+            print(result)
             return 200, result
         return 200
 
@@ -132,25 +148,13 @@ class PostgresService():
         
         return await self.execute_query(insert_study_query, db_conn)
 
-    async def report_trial_by_id(self, study_id: int, trial_id: int, trial: TrialRequest, study: StudyRequest=None, latest_study=True):
+    async def report_trial_by_id(self, study_id: int, trial: TrialRequest, study: StudyRequest=None):
         # to get study_id we need to first insert the study into the db and then get the latest study record and extract the id
         # because the study_id is auto generated incrementally
         if trial.id == 0:
             await self.report_new_study(study=study)
 
         db_conn = self.create_db_connection()
-        
-        # if we want to report the trial to the latest study' we'll get the latest study id
-        if latest_study:
-            # get latest study id
-            latest_study_id_query = '''
-                SELECT study_id
-                FROM optuna_study
-                ORDER BY study_id DESC
-                LIMIT 1
-            '''
-            return_code, query_result = await self.execute_query(latest_study_id_query, db_conn, return_query_result=True)
-            study_id = query_result[0][0]
 
         insert_query = f'''
         INSERT INTO optuna_trial(
@@ -202,6 +206,11 @@ class PostgresService():
 
         return self.execute_query(insert_query, db_conn)
         
+    async def report_trial_to_last_study(self, trial_id: int, trial: TrialRequest):
+        latest_study = await self.get_latest_study()
+        latest_study_id = latest_study[0]
+        return await self.report_trial_by_id(study_id=latest_study_id, trial=trial, study=latest_study)
+
     async def get_latest_study(self):
         get_latest_study_query = '''
             SELECT * 
@@ -224,16 +233,17 @@ class PostgresService():
     async def get_best_trial_from_latest_study(self):
         get_best_trial_from_latest_study_query = '''
             SELECT *
-            FROM optuna_trial
-            WHERE study_id = (
+            FROM optuna_trial AS outr
+            WHERE overall_loss_value != -1
+            AND study_id = (
                 SELECT MAX(inr.study_id)
                 FROM optuna_study AS inr
-            ) 
-            AND loss_value = (
-                SELECT MIN(inr.loss_value)
+            ) AND overall_loss_value = (
+                SELECT MIN(inr.overall_loss_value)
                 FROM optuna_trial AS inr
-            )
-            AND state = 'COMPLETED';
+                WHERE inr.study_id = outr.study_id
+                AND inr.overall_loss_value != -1
+            ) AND outr.state = 'COMPLETED';
         '''
 
         # if any of the try blocks fails, we'll return "internal server error" code
@@ -245,3 +255,6 @@ class PostgresService():
         
         status_code, query_result = await self.execute_query(get_best_trial_from_latest_study_query, db_conn, return_query_result=True)
         return query_result
+
+    async def get_best_hyperparameters(self):
+        pass

@@ -6,11 +6,11 @@ from typing import Union
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from postgres import postgres_controller
+from postgres import router as postgres_router
 
 app = FastAPI()
 
-app.include_router(postgres_controller.postgres_router)
+app.include_router(postgres_router.router)
 
 @app.get('/')
 async def home():
