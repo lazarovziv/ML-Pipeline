@@ -3,6 +3,9 @@ import asyncio
 import requests
 import psycopg2
 
+os.environ['API_URL'] = 'http://localhost'
+os.environ['API_PORT'] = '8000'
+
 URL = os.environ['API_URL']
 PORT = os.environ['API_PORT']
 FULL_URL = f'{URL}:{PORT}' if PORT else URL
@@ -143,18 +146,3 @@ async def get_best_hyperparameters(from_last_study=False):
     response = requests.get(url)
 
     return response.json()
-
-def get_last_study_id():
-    db_conn = init_db_connection()
-    cursor = db_conn.cursor()
-
-    query = 'SELECT MAX(study_id) FROM optuna_study;'
-
-    cursor.execute(query)
-    result = cursor.fetchall()[0][0]
-    
-    db_conn.commit()
-    cursor.close()
-    db_conn.close()
-
-    return result

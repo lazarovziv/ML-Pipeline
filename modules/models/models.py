@@ -1,3 +1,4 @@
+from sklearn.base import is_classifier
 import torch
 import torch.nn as nn
 
@@ -32,9 +33,10 @@ class MaxUnPoolBlock(nn.Module):
         return x
     
 class ConvEncoder(nn.Module):
-    def __init__(self, in_channels, encoded_dim, pooling_type, initial_out_channels=3, relu_slope=0, device='cpu'):
+    def __init__(self, in_channels, encoded_dim, pooling_type, initial_out_channels=3, relu_slope=0, is_classifier=False, device='cpu'):
         super().__init__()
         
+        self.is_classifier = is_classifier
         self.device = device
         
         # non parameterized functionality
@@ -183,6 +185,12 @@ class ConvEncoder(nn.Module):
         Y2 = self.relu(Y2)
         
         Y = self.flatten(Y2)
+
+        if self.is_classifier:
+            return Y
+
+        # initial_out_channels * 240
+        # print(f'Y Shape: {Y2.shape}')
         
         encoded_mean = self.encoded_mean(Y)
         encoded_log_var = self.encoded_log_variance(Y)
@@ -343,14 +351,14 @@ def kl_divergence_loss(mean, log_var):
     return -0.5 * kl_sum.mean(dim=0)
 
 class ConvAutoEncoder(nn.Module):
-    def __init__(self, in_channels, encoded_dim, initial_out_channels, relu_slope, device, pooling_type='max'):
+    def __init__(self, in_channels, encoded_dim, initial_out_channels, relu_slope, device, pooling_type='max', is_classifier=False):
         super().__init__()
 
         self.device = device
         # latent space is encoded_dim dimensions
         self.encoder = ConvEncoder(in_channels=in_channels, encoded_dim=encoded_dim,
                                    initial_out_channels=initial_out_channels,
-                                   pooling_type=pooling_type, relu_slope=relu_slope, device=device)
+                                   pooling_type=pooling_type, relu_slope=relu_slope, is_classifier=is_classifier, device=device)
         self.decoder = ConvDecoder(encoded_dim=encoded_dim,
                                    initial_out_channels=self.encoder.final_out_channels,
                                    encoder_initial_out_channels=initial_out_channels, relu_slope=relu_slope)
@@ -370,12 +378,12 @@ class ConvAutoEncoder(nn.Module):
         pass
 
 class ConvClassifier(nn.Module):
-    def __init__(self, train_params, num_classes, pooling_type='max', num_blocks=2, relu_slope=0, device='cpu'):
+    def __init__(self, train_params, num_classes, pooling_type='max', relu_slope=0, device='cpu'):
         super().__init__()
 
         autoencoder = ConvAutoEncoder(in_channels=1, encoded_dim=train_params['encoded_dim'],
                                     initial_out_channels=train_params['initial_out_channels'],
-                                    pooling_type=pooling_type, relu_slope=relu_slope, device=device)
+                                    pooling_type=pooling_type, relu_slope=relu_slope, is_classifier=True, device=device)
         autoencoder.load_state_dict(load_model(train_params))
         autoencoder.train()
 
@@ -385,46 +393,18 @@ class ConvClassifier(nn.Module):
         # disabling autograd system to prevent retraining
         for _, param in self.encoder.named_parameters():
             param.requires_grad = False
-        
-        self.num_blocks = num_blocks
-        self.blocks = [self.block(train_params['encoded_dim'], 256)]
-        for i in range(self.num_blocks - 2):
-            dropout_rate = 0.25 if i % 2 == 0 else 0
-            self.blocks.extend(self.block(256, 256, dropout_rate=dropout_rate))
-        self.blocks.extend(self.block(256, 64))
-        
-        self.block_modules = nn.ModuleList(self.blocks)
-        self.seq_output = nn.Linear(64, num_classes)
 
-        self.bn = nn.BatchNorm1d(train_params['encoded_dim'])
+        self.bn = nn.BatchNorm1d(train_params['initial_out_channels'] * 240)
         # relu_slope = 0 is the same as regular relu
         self.relu = nn.ReLU() # nn.LeakyReLU(relu_slope)
-        # self.seq_block0 = self.block(train_params['encoded_dim'], 256)
-        # self.seq_block1 = self.block(256, 256)
-        # self.seq_block2 = self.block(256, 64)
-        # self.seq_output = nn.Linear(64, num_classes)
+        self.seq_output = nn.Linear(train_params['initial_out_channels'] * 240, num_classes)
 
         self.log_softmax = nn.LogSoftmax(dim=1)
 
-    def block(self, in_dim, out_dim, dropout_rate=0):
-        return nn.Sequential(
-            # setting bias to False since BatchNorm has one
-            nn.Linear(in_dim, out_dim, bias=False),
-            nn.BatchNorm1d(out_dim),
-            nn.ReLU(),
-            # nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
-        )
-
     def forward(self, X):
-        Y = self.encoder(X)[0]
+        Y = self.encoder(X)
         Y = self.bn(Y)
-        Y = self.relu(Y)
 
-        for block in self.block_modules:
-            Y = block(Y)
-        # Y = self.seq_block0(Y)
-        # Y = self.seq_block1(Y)
-        # Y = self.seq_block2(Y)
         Y = self.seq_output(Y)
         return self.log_softmax(Y)
         
