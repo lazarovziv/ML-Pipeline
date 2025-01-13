@@ -16,13 +16,13 @@ class PostgresService():
     def __init__(self):
         # initialize environment variables manually (would come from a k8s secret)
         if not os.path.exists('./.env'):
-            raise IOError('.env file doesn\'t exist. Can\'t initialize connection to the database!')
-
-        with open('./.env', 'r') as f:
-            lines = f.read().splitlines()
-            for line in lines:
-                key, value = line.split('=')
-                os.environ[key] = value
+            print('.env file doesn\'t exist. Can\'t initialize connection to the database!')
+        else:
+            with open('./.env', 'r') as f:
+                lines = f.read().splitlines()
+                for line in lines:
+                    key, value = line.split('=')
+                    os.environ[key] = value
         
         self.db_user = os.environ['POSTGRES_USERNAME']
         self.db_password = os.environ['POSTGRES_PASSWORD']
@@ -209,6 +209,7 @@ class PostgresService():
     async def report_trial_to_last_study(self, trial_id: int, trial: TrialRequest):
         latest_study = await self.get_latest_study()
         latest_study_id = latest_study[0]
+        print(latest_study)
         return await self.report_trial_by_id(study_id=latest_study_id, trial=trial, study=latest_study)
 
     async def get_latest_study(self):
