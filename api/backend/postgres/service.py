@@ -255,6 +255,29 @@ class PostgresService():
         
         status_code, query_result = await self.execute_query(get_best_trial_from_latest_study_query, db_conn, return_query_result=True)
         return query_result
+    
+    async def get_best_n_trials_from_latest_study(self, n):
+        get_best_n_trials_from_latest_study_query = f'''
+            SELECT *
+            FROM optuna_trial AS outr
+            WHERE overall_loss_value != -1
+            AND study_id = (
+                SELECT MAX(inr.study_id)
+                FROM optuna_study AS inr
+            ) AND outr.state = 'COMPLETED'
+            ORDER BY outr.overall_loss_value ASC
+            LIMIT {n};
+        '''
+
+        # if any of the try blocks fails, we'll return "internal server error" code
+        try:
+            db_conn = self.create_db_connection()
+        except DatabaseConnectionException as e:
+            print(str(e))
+            return 500
+        
+        status_code, query_result = await self.execute_query(get_best_n_trials_from_latest_study_query, db_conn, return_query_result=True)
+        return query_result
 
     async def get_best_hyperparameters(self):
         pass

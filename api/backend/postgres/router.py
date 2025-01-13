@@ -8,9 +8,6 @@ from .service import PostgresService
 class PostgresController:
     def __init__(self):
         self.router = APIRouter(prefix='/optuna')
-        self.router.add_api_route(
-            '/study/{study_id}/trial/{trial_id}', self.report_trial_by_id, methods=['POST']
-        )
 
 router = APIRouter(prefix='/optuna')
 
@@ -35,6 +32,10 @@ async def get_latest_study():
 @router.get('/study/latest/best_trial')
 async def get_best_trial_from_latest_study():
     return await service.get_best_trial_from_latest_study()
+
+@router.get('/study/latest/best_trials/{n}')
+async def get_best_n_trials_from_latest_study(n: int):
+    return await service.get_best_n_trials_from_latest_study(n=n)
 
 @router.get('/best_hyperparameters')
 async def get_best_hyperparameters():

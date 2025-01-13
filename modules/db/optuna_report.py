@@ -93,7 +93,8 @@ async def report_optuna_study(study):
     return response.status_code
 
 async def report_optuna_trial(study, trial):
-    trial_id = trial.number
+    # no need to create a new study for first trial, the api takes care of it
+    trial_id = trial.number 
     trial_state = "'COMPLETED'" if trial.state == 1 else "'PRUNED'"
     trial_encoded_dim = trial.params['encoded_dim']
     trial_initial_out_channels = trial.params['initial_out_channels']
@@ -110,6 +111,19 @@ async def report_optuna_trial(study, trial):
     trial_batch_size = trial.params['batch_size']
     trial_loss_function_id = trial.params['loss_idx']
     trial_relu_slope = trial.params['relu_slope']
+
+    if trial.values:
+        # single objective function
+        if len(trial.values) == 1:
+            trial_overall_loss_value = trial.values[0]
+            trial_loss_value = -1.0
+            trial_kl_divergence_loss_value = -1.0
+        else:
+            trial_kl_divergence_loss_value = trial.values[0]
+            trial_loss_value = trial.values[1]
+            trial_overall_loss_value = trial_loss_value + trial_kl_divergence_lambda * trial_kl_divergence_loss_value
+    else:
+        trial_overall_loss_value, trial_loss_value, trial_kl_divergence_loss_value = -1.0, -1.0, -1.0
 
     json_data = {
         'id': trial_id,
@@ -146,3 +160,10 @@ async def get_best_hyperparameters(from_last_study=False):
     response = requests.get(url)
 
     return response.json()
+
+def get_last_study_id():
+    url_path = 'optuna/study/latest'
+    url = f'{FULL_URL}/{url_path}'
+    response = requests.get(url)
+
+    return response.json()[0]['study_id']

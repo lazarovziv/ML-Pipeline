@@ -150,6 +150,7 @@ class ConvEncoder(nn.Module):
             self.relu,
             pooling_layer,
             nn.BatchNorm2d(out_channels),
+            nn.Dropout(0.2)
         )
     
     def down_sample_block(self, in_channels, out_channels, kernel_size, padding, stride):
@@ -297,6 +298,7 @@ class ConvDecoder(nn.Module):
             nn.ConvTranspose2d(in_channels=out_channels, out_channels=out_channels,
                                kernel_size=kernel_size, padding=padding, stride=stride, bias=False),
             nn.BatchNorm2d(out_channels),
+            nn.Dropout(0.2)
         )
     
     def up_sample_block(self, in_channels, out_channels, kernel_size, padding, stride):
@@ -396,14 +398,14 @@ class ConvClassifier(nn.Module):
 
         self.bn = nn.BatchNorm1d(train_params['initial_out_channels'] * 240)
         # relu_slope = 0 is the same as regular relu
-        self.relu = nn.ReLU() # nn.LeakyReLU(relu_slope)
+        self.relu = nn.LeakyReLU(relu_slope)
         self.seq_output = nn.Linear(train_params['initial_out_channels'] * 240, num_classes)
 
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, X):
         Y = self.encoder(X)
-        Y = self.bn(Y)
+        # Y = self.bn(Y)
 
         Y = self.seq_output(Y)
         return self.log_softmax(Y)
