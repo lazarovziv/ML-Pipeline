@@ -16,7 +16,7 @@ class TrialRequest(BaseModel):
     kl_divergence_lambda: float
     epochs: int
     batch_size: int
-    loss_function_id: int
+    loss_function: str
     overall_loss_value: float
     kl_divergence_loss_value: float
     loss_value: float
