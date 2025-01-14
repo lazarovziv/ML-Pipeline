@@ -1,6 +1,8 @@
 import os
 import torch
 
+import torch.nn as nn
+
 def create_model_name(opt, params):
     if opt:
         final_name = f'{opt.__class__.__name__}-'
@@ -72,3 +74,14 @@ def load_model(params):
     latest_model_number = max(model_numbers)
     file_name = list(filter(lambda s: s.endswith(f'{latest_model_number}.pt') and model_match_params(s, params), params_matched_model_names))[0]
     return torch.load(f'./saved_models/{file_name}', weights_only=True)
+
+class RMSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        
+    def forward(self, y_pred, y_true):
+        return torch.sqrt(self.mse(y_pred, y_true))
+
+def get_loss_function(loss_idx):
+    return nn.MSELoss() if loss_idx == 0 else RMSELoss()

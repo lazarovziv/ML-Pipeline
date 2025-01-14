@@ -3,8 +3,10 @@ import asyncio
 import requests
 import psycopg2
 
-os.environ['API_URL'] = 'http://localhost'
-os.environ['API_PORT'] = '8000'
+from modules.models.utils import get_loss_function
+
+os.environ['API_URL'] = 'http://10.0.0.2'
+os.environ['API_PORT'] = '8001'
 
 URL = os.environ['API_URL']
 PORT = os.environ['API_PORT']
@@ -15,16 +17,8 @@ class MissingQueryParameterException(Exception):
         super().__init__(message)
         self.message = message
 
-'''
-to call from notebook,
 
-loop = asyncio.get_event_loop()
-loop.create_task(report_optuna_trial(study, trial))
-
-'''
-
-
-async def report_optuna_study(study):
+def report_optuna_study(study):
     study_distributions = study.get_trials(deepcopy=False)[0].distributions
 
     encoded_dim_min = study_distributions['encoded_dim'].low
@@ -49,12 +43,13 @@ async def report_optuna_study(study):
     batch_size_max = study_distributions['batch_size'].high
     beta1_min = study_distributions['beta1'].low   
     beta1_max = study_distributions['beta1'].high
-    beta2_min =study_distributions['beta2'].low
+    beta2_min = study_distributions['beta2'].low
     beta2_max = study_distributions['beta2'].high
     optimizer_idx_min = study_distributions['optimizer_idx'].low
     optimizer_idx_max = study_distributions['optimizer_idx'].high
     relu_slope_min = study_distributions['relu_slope'].low
     relu_slope_max = study_distributions['relu_slope'].high
+    dataset_size = study_distributions['dataset_size'].low
 
     json_data = {
         'encoded_dim_min': encoded_dim_min,
@@ -85,6 +80,7 @@ async def report_optuna_study(study):
         'optimizer_idx_max': optimizer_idx_max,
         'relu_slope_min': relu_slope_min,
         'relu_slope_max': relu_slope_max,
+        'dataset_size': dataset_size # size of the train dataset, without val
     }
 
     url = f'{FULL_URL}/optuna/study/new'
@@ -92,8 +88,10 @@ async def report_optuna_study(study):
 
     return response.status_code
 
-async def report_optuna_trial(study, trial):
-    # no need to create a new study for first trial, the api takes care of it
+def report_optuna_trial(study, trial):
+    if trial.number == 0:
+        report_optuna_study(study)
+    
     trial_id = trial.number 
     trial_state = "'COMPLETED'" if trial.state == 1 else "'PRUNED'"
     trial_encoded_dim = trial.params['encoded_dim']
@@ -148,12 +146,12 @@ async def report_optuna_trial(study, trial):
         'relu_slope': trial_relu_slope
     }
 
-    url = f'{FULL_URL}/optuna/study/latest/trial/{trial_id}'
+    url = f'{FULL_URL}/optuna/study/trial'
     response = requests.post(url, json=json_data)
 
     return response.status_code
 
-async def get_best_hyperparameters(from_last_study=False):
+def get_best_hyperparameters(from_last_study=False):
     url_path = 'latest/best_trial' if from_last_study else 'best_hyperparameters'
 
     url = f'{FULL_URL}/optuna/study/{url_path}'
