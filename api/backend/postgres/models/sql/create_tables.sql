@@ -93,7 +93,8 @@ CREATE OR REPLACE FUNCTION update_optuna_study_best_overall_loss_value()
 BEGIN
     UPDATE optuna_study
     SET best_overall_loss_value = LEAST(best_overall_loss_value, NEW.overall_loss_value)
-    WHERE optuna_study.study_id = NEW.study_id;
+    WHERE optuna_study.study_id = NEW.study_id
+        AND NEW.overall_loss_value != -1;
 
     RETURN NEW;
 END;

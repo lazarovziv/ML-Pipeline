@@ -180,7 +180,7 @@ class PostgresService():
         ) VALUES (
             {study_id},
             {trial.id},
-            '{trial.state}',
+            {trial.state},
             {trial.encoded_dim},
             {trial.initial_out_channels},
             {trial.learning_rate},
@@ -194,7 +194,7 @@ class PostgresService():
             {trial.kl_divergence_lambda},
             {trial.epochs},
             {trial.batch_size},
-            '{trial.loss_function}',
+            {trial.loss_function_id},
             {trial.relu_slope},
             {trial.overall_loss_value},
             {trial.kl_divergence_loss_value},
