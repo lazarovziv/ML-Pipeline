@@ -257,4 +257,32 @@ class PostgresService():
         return query_result
 
     async def get_best_hyperparameters(self):
-        pass
+        get_best_hyperparameters_query = '''
+            SELECT *
+            FROM optuna_trial AS outr
+            WHERE overall_loss_value != -1
+            AND overall_loss_value = (
+                SELECT MIN(inr.overall_loss_value)
+                FROM optuna_trial AS inr
+                WHERE inr.overall_loss_value != -1
+                AND inr.state = 'COMPLETED'
+                AND loss_function_id = 0
+            ) AND outr.state = 'COMPLETED';
+        '''
+        # get_best_hyperparameters_query = '''
+        #     SELECT MIN(inr.overall_loss_value)
+        #     FROM optuna_trial AS inr
+        #     WHERE inr.overall_loss_value != -1
+        #     AND inr.state = 'COMPLETED'
+        #     AND loss_function_id = 0;
+        # '''
+
+        # if any of the try blocks fails, we'll return "internal server error" code
+        try:
+            db_conn = self.create_db_connection()
+        except DatabaseConnectionException as e:
+            print(str(e))
+            return 500
+        
+        status_code, query_result = await self.execute_query(get_best_hyperparameters_query, db_conn, return_query_result=True)
+        return query_result
