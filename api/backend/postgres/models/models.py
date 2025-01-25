@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 
 class TrialRequest(BaseModel):
-    study_id: int
     id: int
     state: str
     encoded_dim: int

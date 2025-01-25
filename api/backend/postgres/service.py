@@ -2,7 +2,7 @@ import os
 
 from typing import Union
 
-import asyncio
+import io
 import psycopg2
 # for returning a dictionary from the query that'll be returned as a json
 from psycopg2.extras import RealDictCursor
@@ -16,13 +16,13 @@ class PostgresService():
     def __init__(self):
         # initialize environment variables manually (would come from a k8s secret)
         if not os.path.exists('./.env'):
-            raise IOError('.env file doesn\'t exist. Can\'t initialize connection to the database!')
-
-        with open('./.env', 'r') as f:
-            lines = f.read().splitlines()
-            for line in lines:
-                key, value = line.split('=')
-                os.environ[key] = value
+            print('.env file doesn\'t exist. Can\'t initialize connection to the database!')
+        else:
+            with open('./.env', 'r') as f:
+                lines = f.read().splitlines()
+                for line in lines:
+                    key, value = line.split('=')
+                    os.environ[key] = value
         
         self.db_user = os.environ['POSTGRES_USERNAME']
         self.db_password = os.environ['POSTGRES_PASSWORD']
@@ -39,8 +39,10 @@ class PostgresService():
             print(str(e))
             return
         
-        loop = asyncio.get_event_loop()
-        loop.create_task(self.execute_query(init_query, db_conn))
+        # loop = io.get_event_loop()
+        # loop.create_task(self.execute_query(init_query, db_conn))
+
+        self.execute_query(init_query, db_conn)
         
     def create_db_connection(self):
         try:
@@ -58,7 +60,7 @@ class PostgresService():
         
         return db_conn
 
-    async def execute_query(self, query, db_conn, return_query_result=False):
+    def execute_query(self, query, db_conn, return_query_result=False):
         try:
             cursor = db_conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(query)
@@ -71,11 +73,10 @@ class PostgresService():
             return 500
             
         if return_query_result:
-            print(result)
             return 200, result
         return 200
 
-    async def report_new_study(self, study: StudyRequest):
+    def report_new_study(self, study: StudyRequest):
         insert_study_query = f'''
         INSERT INTO optuna_study(
             encoded_dim_min,
@@ -146,14 +147,11 @@ class PostgresService():
         except DatabaseConnectionException as e:
             return 500
         
-        return await self.execute_query(insert_study_query, db_conn)
+        task = self.execute_query(insert_study_query, db_conn)
+        result =  task
+        return result
 
-    async def report_trial_by_id(self, study_id: int, trial: TrialRequest, study: StudyRequest=None):
-        # to get study_id we need to first insert the study into the db and then get the latest study record and extract the id
-        # because the study_id is auto generated incrementally
-        if trial.id == 0:
-            await self.report_new_study(study=study)
-
+    def report_trial_by_id(self, study_id: int, trial: TrialRequest):
         db_conn = self.create_db_connection()
 
         insert_query = f'''
@@ -174,7 +172,7 @@ class PostgresService():
             kl_divergence_lambda,
             epochs,
             batch_size,
-            loss_function_id,
+            loss_function,
             relu_slope,
             overall_loss_value,
             kl_divergence_loss_value,
@@ -206,12 +204,12 @@ class PostgresService():
 
         return self.execute_query(insert_query, db_conn)
         
-    async def report_trial_to_last_study(self, trial_id: int, trial: TrialRequest):
-        latest_study = await self.get_latest_study()
-        latest_study_id = latest_study[0]
-        return await self.report_trial_by_id(study_id=latest_study_id, trial=trial, study=latest_study)
+    def report_trial_to_last_study(self, trial_id: int, trial: TrialRequest):
+        latest_study =  self.get_latest_study()
+        latest_study_id = int(latest_study[0]['study_id'])
+        return self.report_trial_by_id(study_id=latest_study_id, trial=trial)
 
-    async def get_latest_study(self):
+    def get_latest_study(self):
         get_latest_study_query = '''
             SELECT * 
             FROM optuna_study
@@ -227,10 +225,30 @@ class PostgresService():
             print(str(e))
             return 500
         
-        status_code, query_result = await self.execute_query(get_latest_study_query, db_conn, return_query_result=True)
+        status_code, query_result =  self.execute_query(get_latest_study_query, db_conn, return_query_result=True)
         return query_result
 
-    async def get_best_trial_from_latest_study(self):
+    def get_all_trials_from_last_study(self):
+        get_latest_trials_query = '''
+            SELECT * 
+            FROM optuna_trial
+            WHERE study_id = (
+                SELECT MAX(inr.study_id)
+                FROM optuna_study AS inr
+            )
+            ORDER BY trial_id DESC;
+        '''
+        # if any of the try blocks fails, we'll return "internal server error" code
+        try:
+            db_conn = self.create_db_connection()
+        except DatabaseConnectionException as e:
+            print(str(e))
+            return 500
+        
+        status_code, query_result =  self.execute_query(get_latest_trials_query, db_conn, return_query_result=True)
+        return query_result
+
+    def get_best_trial_from_latest_study(self):
         get_best_trial_from_latest_study_query = '''
             SELECT *
             FROM optuna_trial AS outr
@@ -253,10 +271,33 @@ class PostgresService():
             print(str(e))
             return 500
         
-        status_code, query_result = await self.execute_query(get_best_trial_from_latest_study_query, db_conn, return_query_result=True)
+        status_code, query_result =  self.execute_query(get_best_trial_from_latest_study_query, db_conn, return_query_result=True)
+        return query_result
+    
+    def get_best_n_trials_from_latest_study(self, n):
+        get_best_n_trials_from_latest_study_query = f'''
+            SELECT *
+            FROM optuna_trial AS outr
+            WHERE overall_loss_value != -1
+            AND study_id = (
+                SELECT MAX(inr.study_id)
+                FROM optuna_study AS inr
+            ) AND outr.state = 'COMPLETED'
+            ORDER BY outr.overall_loss_value ASC
+            LIMIT {n};
+        '''
+
+        # if any of the try blocks fails, we'll return "internal server error" code
+        try:
+            db_conn = self.create_db_connection()
+        except DatabaseConnectionException as e:
+            print(str(e))
+            return 500
+        
+        status_code, query_result =  self.execute_query(get_best_n_trials_from_latest_study_query, db_conn, return_query_result=True)
         return query_result
 
-    async def get_best_hyperparameters(self):
+    def get_best_hyperparameters(self):
         get_best_hyperparameters_query = '''
             SELECT *
             FROM optuna_trial AS outr

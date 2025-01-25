@@ -3,6 +3,11 @@ import asyncio
 import requests
 import psycopg2
 
+from modules.models.utils import get_loss_function
+
+os.environ['API_URL'] = 'http://10.0.0.2'
+os.environ['API_PORT'] = '8001'
+
 URL = os.environ['API_URL']
 PORT = os.environ['API_PORT']
 FULL_URL = f'{URL}:{PORT}' if PORT else URL
@@ -12,16 +17,8 @@ class MissingQueryParameterException(Exception):
         super().__init__(message)
         self.message = message
 
-'''
-to call from notebook,
 
-loop = asyncio.get_event_loop()
-loop.create_task(report_optuna_trial(study, trial))
-
-'''
-
-
-async def report_optuna_study(study):
+def report_optuna_study(study):
     study_distributions = study.get_trials(deepcopy=False)[0].distributions
 
     encoded_dim_min = study_distributions['encoded_dim'].low
@@ -46,12 +43,13 @@ async def report_optuna_study(study):
     batch_size_max = study_distributions['batch_size'].high
     beta1_min = study_distributions['beta1'].low   
     beta1_max = study_distributions['beta1'].high
-    beta2_min =study_distributions['beta2'].low
+    beta2_min = study_distributions['beta2'].low
     beta2_max = study_distributions['beta2'].high
     optimizer_idx_min = study_distributions['optimizer_idx'].low
     optimizer_idx_max = study_distributions['optimizer_idx'].high
     relu_slope_min = study_distributions['relu_slope'].low
     relu_slope_max = study_distributions['relu_slope'].high
+    dataset_size = study_distributions['dataset_size'].low
 
     json_data = {
         'encoded_dim_min': encoded_dim_min,
@@ -82,6 +80,7 @@ async def report_optuna_study(study):
         'optimizer_idx_max': optimizer_idx_max,
         'relu_slope_min': relu_slope_min,
         'relu_slope_max': relu_slope_max,
+        'dataset_size': dataset_size # size of the train dataset, without val
     }
 
     url = f'{FULL_URL}/optuna/study/new'
@@ -89,8 +88,11 @@ async def report_optuna_study(study):
 
     return response.status_code
 
-async def report_optuna_trial(study, trial):
-    trial_id = trial.number
+def report_optuna_trial(study, trial):
+    if trial.number == 0:
+        report_optuna_study(study)
+    
+    trial_id = trial.number 
     trial_state = "'COMPLETED'" if trial.state == 1 else "'PRUNED'"
     trial_encoded_dim = trial.params['encoded_dim']
     trial_initial_out_channels = trial.params['initial_out_channels']
@@ -107,6 +109,19 @@ async def report_optuna_trial(study, trial):
     trial_batch_size = trial.params['batch_size']
     trial_loss_function_id = trial.params['loss_idx']
     trial_relu_slope = trial.params['relu_slope']
+
+    if trial.values:
+        # single objective function
+        if len(trial.values) == 1:
+            trial_overall_loss_value = trial.values[0]
+            trial_loss_value = -1.0
+            trial_kl_divergence_loss_value = -1.0
+        else:
+            trial_kl_divergence_loss_value = trial.values[0]
+            trial_loss_value = trial.values[1]
+            trial_overall_loss_value = trial_loss_value + trial_kl_divergence_lambda * trial_kl_divergence_loss_value
+    else:
+        trial_overall_loss_value, trial_loss_value, trial_kl_divergence_loss_value = -1.0, -1.0, -1.0
 
     json_data = {
         'id': trial_id,
@@ -131,12 +146,12 @@ async def report_optuna_trial(study, trial):
         'relu_slope': trial_relu_slope
     }
 
-    url = f'{FULL_URL}/optuna/study/latest/trial/{trial_id}'
+    url = f'{FULL_URL}/optuna/study/trial'
     response = requests.post(url, json=json_data)
 
     return response.status_code
 
-async def get_best_hyperparameters(from_last_study=False):
+def get_best_hyperparameters(from_last_study=False):
     url_path = 'latest/best_trial' if from_last_study else 'best_hyperparameters'
 
     url = f'{FULL_URL}/optuna/study/{url_path}'
@@ -145,16 +160,8 @@ async def get_best_hyperparameters(from_last_study=False):
     return response.json()
 
 def get_last_study_id():
-    db_conn = init_db_connection()
-    cursor = db_conn.cursor()
+    url_path = 'optuna/study/latest'
+    url = f'{FULL_URL}/{url_path}'
+    response = requests.get(url)
 
-    query = 'SELECT MAX(study_id) FROM optuna_study;'
-
-    cursor.execute(query)
-    result = cursor.fetchall()[0][0]
-    
-    db_conn.commit()
-    cursor.close()
-    db_conn.close()
-
-    return result
+    return response.json()[0]['study_id']

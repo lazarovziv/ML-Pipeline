@@ -3,6 +3,8 @@ import os
 
 from typing import Union
 
+import asyncio
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -22,4 +24,4 @@ async def wait(seconds: int):
     return 200
 
 async def sleep(seconds: int):
-    time.sleep(seconds)
+    asyncio.sleep(seconds)

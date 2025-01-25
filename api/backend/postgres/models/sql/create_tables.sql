@@ -93,14 +93,15 @@ CREATE OR REPLACE FUNCTION update_optuna_study_best_overall_loss_value()
 BEGIN
     UPDATE optuna_study
     SET best_overall_loss_value = LEAST(best_overall_loss_value, NEW.overall_loss_value)
-    WHERE optuna_study.study_id = NEW.study_id;
+    WHERE optuna_study.study_id = NEW.study_id
+        AND NEW.overall_loss_value != -1;
 
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 -- defining the trigger with the update function and using it after each insert of a study's trial
-CREATE TRIGGER update_optuna_study_best_overall_loss_value_trigger
+CREATE OR REPLACE TRIGGER update_optuna_study_best_overall_loss_value_trigger
 AFTER INSERT ON optuna_trial
 FOR EACH ROW 
 EXECUTE FUNCTION update_optuna_study_best_overall_loss_value();
