@@ -371,42 +371,65 @@ class ConvAutoEncoder(nn.Module):
         # limits usage in batches with the last batch size that was used in training
         self.decoder.set_max_indices(max_indices)
         decoded = self.decoder(encoded)
-        # TODO add decrement of laplace filtered images
-        # decoded = decoded - torch.tensor()
         
         return encoded, encoded_mean, encoded_log_var, decoded
 
-    def laplace_filtered(self, X):
-        pass
+    # def laplace_filtered(self, X):
+    #     pass
 
 class ConvClassifier(nn.Module):
-    def __init__(self, train_params, num_classes, pooling_type='max', relu_slope=0, device='cpu'):
+    def __init__(self, train_params, num_classes, pooling_type='max', relu_slope=0, device='cpu', fine_tune=True):
         super().__init__()
 
         autoencoder = ConvAutoEncoder(in_channels=1, encoded_dim=train_params['encoded_dim'],
                                     initial_out_channels=train_params['initial_out_channels'],
                                     pooling_type=pooling_type, relu_slope=relu_slope, is_classifier=True, device=device)
-        autoencoder.load_state_dict(load_model(train_params))
+        if fine_tune:
+            autoencoder.load_state_dict(load_model(train_params))
         autoencoder.train()
 
         self.device = device
         
         self.encoder = autoencoder.encoder
-        # disabling autograd system to prevent retraining
-        for _, param in self.encoder.named_parameters():
-            param.requires_grad = False
-
+        if fine_tune:
+            # disabling autograd system to prevent retraining
+            for _, param in self.encoder.named_parameters():
+                param.requires_grad = False
+        
         self.bn = nn.BatchNorm1d(train_params['initial_out_channels'] * 240)
         # relu_slope = 0 is the same as regular relu
         self.relu = nn.LeakyReLU(relu_slope)
-        self.seq_output = nn.Linear(train_params['initial_out_channels'] * 240, num_classes)
+        # using average pooling like in resnet for a smaller number of weights to train
+        # self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        # self.seq_output = nn.Linear(train_params['initial_out_channels'] * 240, num_classes)
 
+        self.blocks = [
+            self.linear_block(train_params['initial_out_channels'] * 240, 512),
+            self.linear_block(512, 256),
+            self.linear_block(256, 128)
+        ]
+        self.linear_blocks = nn.ModuleList(self.blocks)
+
+        self.seq_output = nn.Linear(128, num_classes)
         self.log_softmax = nn.LogSoftmax(dim=1)
+
+    def linear_block(self, input_dim, output_dim, dropout_rate=0.25):
+        return nn.Sequential(
+            nn.Linear(input_dim, output_dim, bias=False),
+            nn.BatchNorm1d(output_dim),
+            self.relu,
+            nn.Dropout(dropout_rate)
+        )
 
     def forward(self, X):
         Y = self.encoder(X)
-        # Y = self.bn(Y)
+        Y = self.bn(Y)
+        Y = self.relu(Y)
+        # Y = self.avg_pool(Y.unsqueeze(dim=1))
+        # Y = torch.flatten(Y, start_dim=1)
+
+        for block in self.linear_blocks:
+            Y = block(Y)
 
         Y = self.seq_output(Y)
-        return self.log_softmax(Y)
-        
+        return self.log_softmax(Y)        

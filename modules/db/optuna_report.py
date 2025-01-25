@@ -6,7 +6,7 @@ import psycopg2
 from modules.models.utils import get_loss_function
 
 os.environ['API_URL'] = 'http://10.0.0.2'
-os.environ['API_PORT'] = '8001'
+os.environ['API_PORT'] = '8000'
 
 URL = os.environ['API_URL']
 PORT = os.environ['API_PORT']
@@ -152,12 +152,12 @@ def report_optuna_trial(study, trial):
     return response.status_code
 
 def get_best_hyperparameters(from_last_study=False):
-    url_path = 'latest/best_trial' if from_last_study else 'best_hyperparameters'
+    url_path = 'study/latest/best_trial' if from_last_study else 'best_hyperparameters'
 
-    url = f'{FULL_URL}/optuna/study/{url_path}'
+    url = f'{FULL_URL}/optuna/{url_path}'
     response = requests.get(url)
 
-    return response.json()
+    return response.json()[0]
 
 def get_last_study_id():
     url_path = 'optuna/study/latest'
