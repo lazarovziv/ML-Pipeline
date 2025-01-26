@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS optuna_trial
     kl_divergence_lambda     DOUBLE PRECISION NOT NULL,
     epochs                   INTEGER          NOT NULL,
     batch_size               INTEGER          NOT NULL,
-    loss_function            VARCHAR(30)      NOT NULL,
+    loss_function_id         INTEGER          NOT NULL,
     relu_slope               DOUBLE PRECISION NOT NULL,
     overall_loss_value       DOUBLE PRECISION NOT NULL,
     kl_divergence_loss_value DOUBLE PRECISION NOT NULL,
