@@ -6,7 +6,7 @@ import psycopg2
 from modules.models.utils import get_loss_function
 
 os.environ['API_URL'] = 'http://10.0.0.2'
-os.environ['API_PORT'] = '8000'
+os.environ['API_PORT'] = '8001'
 
 URL = os.environ['API_URL']
 PORT = os.environ['API_PORT']
@@ -124,6 +124,7 @@ def report_optuna_trial(study, trial):
         trial_overall_loss_value, trial_loss_value, trial_kl_divergence_loss_value = -1.0, -1.0, -1.0
 
     json_data = {
+        'study_id': 0,
         'id': trial_id,
         'state': trial_state,
         'encoded_dim': trial_encoded_dim,
@@ -146,7 +147,7 @@ def report_optuna_trial(study, trial):
         'relu_slope': trial_relu_slope
     }
 
-    url = f'{FULL_URL}/optuna/study/trial'
+    url = f'{FULL_URL}/optuna/study/latest/trial/{trial_id}'
     response = requests.post(url, json=json_data)
 
     return response.status_code

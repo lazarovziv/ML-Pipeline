@@ -172,7 +172,7 @@ class PostgresService():
             kl_divergence_lambda,
             epochs,
             batch_size,
-            loss_function,
+            loss_function_id,
             relu_slope,
             overall_loss_value,
             kl_divergence_loss_value,
@@ -180,7 +180,7 @@ class PostgresService():
         ) VALUES (
             {study_id},
             {trial.id},
-            {trial.state},
+            '{trial.state}',
             {trial.encoded_dim},
             {trial.initial_out_channels},
             {trial.learning_rate},
@@ -225,7 +225,7 @@ class PostgresService():
             print(str(e))
             return 500
         
-        status_code, query_result =  self.execute_query(get_latest_study_query, db_conn, return_query_result=True)
+        status_code, query_result = self.execute_query(get_latest_study_query, db_conn, return_query_result=True)
         return query_result
 
     def get_all_trials_from_last_study(self):
@@ -245,7 +245,7 @@ class PostgresService():
             print(str(e))
             return 500
         
-        status_code, query_result =  self.execute_query(get_latest_trials_query, db_conn, return_query_result=True)
+        status_code, query_result = self.execute_query(get_latest_trials_query, db_conn, return_query_result=True)
         return query_result
 
     def get_best_trial_from_latest_study(self):
@@ -271,7 +271,7 @@ class PostgresService():
             print(str(e))
             return 500
         
-        status_code, query_result =  self.execute_query(get_best_trial_from_latest_study_query, db_conn, return_query_result=True)
+        status_code, query_result = self.execute_query(get_best_trial_from_latest_study_query, db_conn, return_query_result=True)
         return query_result
     
     def get_best_n_trials_from_latest_study(self, n):
@@ -294,7 +294,7 @@ class PostgresService():
             print(str(e))
             return 500
         
-        status_code, query_result =  self.execute_query(get_best_n_trials_from_latest_study_query, db_conn, return_query_result=True)
+        status_code, query_result = self.execute_query(get_best_n_trials_from_latest_study_query, db_conn, return_query_result=True)
         return query_result
 
     def get_best_hyperparameters(self):
@@ -318,5 +318,5 @@ class PostgresService():
             print(str(e))
             return 500
         
-        status_code, query_result = await self.execute_query(get_best_hyperparameters_query, db_conn, return_query_result=True)
+        status_code, query_result = self.execute_query(get_best_hyperparameters_query, db_conn, return_query_result=True)
         return query_result
