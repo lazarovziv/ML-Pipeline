@@ -1,16 +1,9 @@
-import os
 import asyncio
 import requests
 import psycopg2
 
 from modules.models.utils import get_loss_function
-
-os.environ['API_URL'] = 'http://10.0.0.2'
-os.environ['API_PORT'] = '8000'
-
-URL = os.environ['API_URL']
-PORT = os.environ['API_PORT']
-FULL_URL = f'{URL}:{PORT}' if PORT else URL
+from modules.db import FULL_URL
 
 class MissingQueryParameterException(Exception):
     def __init__(self, message):
@@ -107,7 +100,7 @@ def report_optuna_trial(study, trial):
     trial_kl_divergence_lambda = trial.params['kl_divergence_lambda']
     trial_epochs = trial.params['epochs']
     trial_batch_size = trial.params['batch_size']
-    trial_loss_function_id = trial.params['loss_idx']
+    trial_loss_function_id = trial.params['loss_function_id']
     trial_relu_slope = trial.params['relu_slope']
 
     if trial.values:
