@@ -168,36 +168,28 @@ class ConvEncoder(nn.Module):
         
         # residual block
         Y0_ = X0 + self.block0(X0)
-        # Y0_, max_indices0 = self.max_pool_block0(Y0_)
-        # max_indices0 = max_indices0[..., :-1, :-1]
         Y0 = self.down_sample0(Y0_)
         Y0 = self.relu(Y0)
         
         Y1_ = Y0 + self.block1(Y0)
-        # Y1_, max_indices1 = self.max_pool_block1(Y1_)
-        # max_indices1 = max_indices1[..., :-1, :-1]
         Y1 = self.down_sample1(Y1_)
         Y1 = self.relu(Y1)
         
         Y2_ = Y1 + self.block2(Y1)
-        # Y2_, max_indices2 = self.max_pool_block2(Y2_)
-        # max_indices2 = max_indices2[..., :-1, :-1]
         Y2 = self.down_sample2(Y2_)
         Y2 = self.relu(Y2)
         
         Y = self.flatten(Y2)
-
-        if self.is_classifier:
-            return Y
-
-        # initial_out_channels * 240
-        # print(f'Y Shape: {Y2.shape}')
         
         encoded_mean = self.encoded_mean(Y)
         encoded_log_var = self.encoded_log_variance(Y)
-        # parameterization trick
-        epsilon = torch.randn_like(encoded_mean).to(dtype=torch.float32)
-        encoded = encoded_mean + epsilon * torch.exp(encoded_log_var/2).to(dtype=torch.float32)
+
+        if self.is_classifier:
+            encoded = encoded_mean + torch.exp(encoded_log_var/2).to(dtype=torch.float32)
+        else:
+            # using the reparameterization trick only when training the encoder
+            epsilon = torch.randn_like(encoded_mean).to(dtype=torch.float32)
+            encoded = encoded_mean + epsilon * torch.exp(encoded_log_var/2).to(dtype=torch.float32)
         
         return encoded, encoded_mean, encoded_log_var, initial_max_indices
     
@@ -316,21 +308,17 @@ class ConvDecoder(nn.Module):
         X0 = self.linear(X)
         # reshaping to (batch, channels, pixels) shape
         X0 = X0.reshape(-1, self.initial_out_channels, 6, 5)
-        # X0 = X0.reshape(-1, self.initial_out_channels, 12, 10)
         X0 = self.relu(X0)
         
         Y0_ = self.up_sample0(X0)
-        # Y0_ = self.max_unpool_block0(Y0_, max_indices[-1], output_size=max_shapes[-1])
         Y0 = Y0_ + self.block0(Y0_)
         Y0 = self.relu(Y0)
         
         Y1_ = self.up_sample1(Y0)
-        # Y1_ = self.max_unpool_block1(Y1_, max_indices[-2], output_size=max_shapes[-2])
         Y1 = Y1_ + self.block1(Y1_)
         Y1 = self.relu(Y1)
         
         Y2_ = self.up_sample2(Y1)
-        # Y2_ = self.max_unpool_block2(Y2_, max_indices[-3], output_size=max_shapes[-3])
         Y2 = Y2_ + self.block2(Y2_)
         Y2 = self.relu(Y2)
         Y2 = self.zero_padding(Y2)
@@ -396,21 +384,19 @@ class ConvClassifier(nn.Module):
             for _, param in self.encoder.named_parameters():
                 param.requires_grad = False
         
-        self.bn = nn.BatchNorm1d(train_params['initial_out_channels'] * 240)
         # relu_slope = 0 is the same as regular relu
         self.relu = nn.LeakyReLU(relu_slope)
-        # using average pooling like in resnet for a smaller number of weights to train
-        # self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
-        # self.seq_output = nn.Linear(train_params['initial_out_channels'] * 240, num_classes)
 
         self.blocks = [
-            self.linear_block(train_params['initial_out_channels'] * 240, 512),
-            self.linear_block(512, 256),
+            self.linear_block(train_params['encoded_dim'], 256),
+            # self.linear_block(512, 256),
+            self.linear_block(256, 256),
             self.linear_block(256, 128)
         ]
-        self.linear_blocks = nn.ModuleList(self.blocks)
-
-        self.seq_output = nn.Linear(128, num_classes)
+        self.seq_linear_blocks = nn.ModuleList(self.blocks)
+        
+        self.seq_classification_head = nn.Linear(128, num_classes)
+        # self.seq_classification_head = nn.Linear(train_params['encoded_dim'], num_classes)
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def linear_block(self, input_dim, output_dim, dropout_rate=0.25):
@@ -422,14 +408,10 @@ class ConvClassifier(nn.Module):
         )
 
     def forward(self, X):
-        Y = self.encoder(X)
-        Y = self.bn(Y)
-        Y = self.relu(Y)
-        # Y = self.avg_pool(Y.unsqueeze(dim=1))
-        # Y = torch.flatten(Y, start_dim=1)
+        Y, _, _, _ = self.encoder(X)
 
-        for block in self.linear_blocks:
+        for block in self.seq_linear_blocks:
             Y = block(Y)
 
-        Y = self.seq_output(Y)
+        Y = self.seq_classification_head(Y)
         return self.log_softmax(Y)        
