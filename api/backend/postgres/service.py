@@ -21,6 +21,9 @@ class PostgresService():
             with open('./.env', 'r') as f:
                 lines = f.read().splitlines()
                 for line in lines:
+                    # skip comments
+                    if line.strip().startswith('#'):
+                        continue
                     key, value = line.split('=')
                     os.environ[key] = value
         
