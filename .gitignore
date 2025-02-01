@@ -3,7 +3,6 @@ secret*
 *.txt
 *.xml
 *.iml
-.env
 # directories
 data/
 .idea/
