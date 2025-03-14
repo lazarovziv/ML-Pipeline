@@ -85,3 +85,17 @@ class RMSELoss(nn.Module):
 
 def get_loss_function(loss_idx):
     return nn.MSELoss() if loss_idx == 0 else RMSELoss()
+
+# params is a dictionary of type 'param_name': ['variable_type', [value_0, value_1] ]
+def initialize_custom_hyperparameters(trial, params):
+    initialized_params = {}
+    for param_name in params.keys():
+        param_type = params[param_name][0]
+        param_values = params[param_name][1]
+        if param_type == 'float':
+            initialized_params[param_name] = trial.suggest_float(param_name, *param_values)
+        elif param_type == 'int':
+            initialized_params[param_name] = trial.suggest_int(param_name, *param_values)
+        elif param_type == 'categorical':
+            initialized_params[param_name] = trial.suggest_categorical(param_name, param_values)
+    return initialized_params
