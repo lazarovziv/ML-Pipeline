@@ -1,6 +1,7 @@
 import os
-import torch
 
+import numpy as np
+import torch
 import torch.nn as nn
 
 def create_model_name(opt, params):
@@ -99,3 +100,9 @@ def initialize_custom_hyperparameters(trial, params):
         elif param_type == 'categorical':
             initialized_params[param_name] = trial.suggest_categorical(param_name, param_values)
     return initialized_params
+
+def normalize_images(imgs, lib=np):
+    imgs += lib.abs(imgs.min())
+    imgs /= imgs.max()
+    imgs *= 255
+    return imgs.astype(np.uint8)
