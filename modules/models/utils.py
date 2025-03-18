@@ -1,8 +1,22 @@
 import os
 
 import numpy as np
+import pandas as pd
+import scipy as sp
+
+from sklearn.metrics import recall_score, precision_score, confusion_matrix
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import cv2
+
 import torch
 import torch.nn as nn
+
+from skimage import feature
+
+import optuna
 
 def create_model_name(opt, params):
     if opt:
@@ -101,8 +115,132 @@ def initialize_custom_hyperparameters(trial, params):
             initialized_params[param_name] = trial.suggest_categorical(param_name, param_values)
     return initialized_params
 
+def show_metrics(y_true, y_preds, classes, plot=True):
+    accuracy = (y_preds == y_true).sum() / y_preds.shape[0]
+
+    print(f'Total Accuracy: {accuracy}\n')
+
+    average_policy = None
+
+    # precision = tp / (tp + fp)
+    print('Precision: ')
+    precisions = precision_score(y_true, y_preds, average=average_policy, zero_division=0)
+    for class_idx in range(len(classes)):
+        print(f'{classes[class_idx]}: {precisions[class_idx]}')
+    print()
+
+    # recall = tp / (tp + fn)
+    print('Recall: ')
+    recalls = recall_score(y_true, y_preds, average=average_policy, zero_division=0)
+    for class_idx in range(len(classes)):
+        print(f'{classes[class_idx]}: {recalls[class_idx]}')
+    print()
+
+    if plot:
+        g = sns.heatmap(confusion_matrix(y_true, y_preds), annot=True, fmt='.3g', yticklabels=classes)
+
+        g.set_xticklabels(labels=[f'{class_name}' for class_name in classes], rotation=60)
+        
+        plt.xlabel('Prediction')
+        plt.ylabel('Truth')
+        plt.title(f'Accuracy: {np.sum(y_true == y_preds) / y_true.shape[0]}')
+
 def normalize_images(imgs, lib=np):
     imgs += lib.abs(imgs.min())
     imgs /= imgs.max()
     imgs *= 255
     return imgs.astype(np.uint8)
+
+# if it's the test dataset we need to use the mean and std from the training dataset
+def normalize(arr, mean=None, std=None, is_train=True):
+    mean = arr.mean() if is_train else mean
+    std = arr.std() if is_train else std
+    return (arr - mean) / std
+
+def create_dataset(X, y, means=None, stds=None, drop_cols=None, largest_descriptor_dim=None, descriptor_shape=None, boundary_pixels=None, is_train=True):
+    # set test dataset dimensions to match the training's
+    if not is_train and boundary_pixels is not None:
+        uppermost_pixel, bottommost_pixel, rightmost_pixel, leftmost_pixel = boundary_pixels
+        X = X[:, uppermost_pixel:bottommost_pixel+1, leftmost_pixel:rightmost_pixel+1]
+
+    df = pd.DataFrame(columns=['id', 'class'])
+    df['id'] = np.arange(X.shape[0])
+    df['class'] = y
+
+    # calculating gradients
+    sobel_x_gradients = sp.ndimage.sobel(X / 255, axis=1)
+    sobel_y_gradients = sp.ndimage.sobel(X / 255, axis=2)
+    mag, angle = cv2.cartToPolar(sobel_x_gradients, sobel_y_gradients, angleInDegrees=True)
+    flattened_magnitudes = mag.flatten().reshape(X.shape[0], -1)
+    gradient_stds = np.array([sample.std() for sample in flattened_magnitudes])
+    df['gradient_std'] = gradient_stds
+    gradients_norma = np.linalg.norm(flattened_magnitudes, axis=1)
+    df['gradient_norma'] = gradients_norma
+    # HoGs
+    df[[f'hog_descriptor_{i}' for i in range(descriptor_shape)]] = np.array([feature.hog(sample, orientations=9, pixels_per_cell=(16, 16), cells_per_block=(4, 4), visualize=True, channel_axis=None)[0] for sample in X])
+
+    # histograms for all images
+    orb = cv2.ORB_create()
+
+    descriptors = []
+    key_points = []
+
+    for i in range(X.shape[0]):
+        image_key_points, image_descriptors = orb.detectAndCompute(X[i], None)
+        descriptors.append(image_descriptors)
+        key_points.append(cv2.KeyPoint_convert(image_key_points))
+
+    orb_histograms = np.zeros((X.shape[0], largest_descriptor_dim))
+    for image_idx in range(len(descriptors)):
+        for desc_value in descriptors[image_idx]:
+            orb_histograms[image_idx, desc_value] += 1
+    df[[f'orb_histogram_{i}' for i in range(largest_descriptor_dim)]] = orb_histograms
+
+    # removing zero variance columns only if it's the training dataset. those columns will be used to drop the same columns in the test dataset
+    if is_train:
+        df_cols_to_drop = []
+        df_cols_means = {}
+        df_cols_stds = {}
+
+        std_epsilon = 1e-4
+
+        for col in df.columns:
+            std = df[col].std()
+            if std < std_epsilon:
+                df.drop(col, axis=1, inplace=True)
+                df_cols_to_drop.append(col)
+            else:
+                df_cols_means[col] = df[col].mean()
+                df_cols_stds[col] = df[col].std()
+        means = df_cols_means
+        stds = df_cols_stds
+    
+    if drop_cols is not None:
+        df.drop(drop_cols, axis=1, inplace=True)
+    
+    # normalizing columns since most of our features are normally distributed
+    for col in df.drop('class', axis=1).columns:
+        df[col] = normalize(df[col], mean=means[col], std=stds[col], is_train=is_train)
+
+    if is_train:
+        return df, df_cols_to_drop, df_cols_means, df_cols_stds
+    return df
+
+def custom_optimize(study_name, objective, n_trials=50):
+    n_trials = np.clip(n_trials, 1, 50)
+    timeout_factor = np.clip(n_trials // 30, 1, 20)
+
+    study = optuna.create_study(study_name=study_name, directions=['maximize'])
+    # study = optuna.create_study(study_name=study_name, directions=directions)
+    study.optimize(objective, n_trials=n_trials, timeout=20000*timeout_factor, show_progress_bar=True, gc_after_trial=True)
+
+    return study
+
+def get_dataset_params():
+    params = {}
+    with open('./params.txt', 'r') as f:
+        for line in f.readlines():
+            line_text = line.split('=')
+            params[line_text[0]] = int(line_text[1][:-1])
+    return params
+    
