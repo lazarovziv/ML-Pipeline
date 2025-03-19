@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import scipy as sp
 
-from sklearn.metrics import recall_score, precision_score, confusion_matrix
+from sklearn.metrics import recall_score, precision_score, confusion_matrix, f1_score
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -136,6 +136,12 @@ def show_metrics(y_true, y_preds, classes, plot=True):
         print(f'{classes[class_idx]}: {recalls[class_idx]}')
     print()
 
+    print('F1 Score: ')
+    f1_scores = f1_score(y_true, y_preds, average=average_policy, zero_division=0)
+    for class_idx in range(len(classes)):
+        print(f'{classes[class_idx]}: {f1_scores[class_idx]}')
+    print()
+
     if plot:
         g = sns.heatmap(confusion_matrix(y_true, y_preds), annot=True, fmt='.3g', yticklabels=classes)
 
@@ -192,6 +198,8 @@ def create_dataset(X, y, means=None, stds=None, drop_cols=None, largest_descript
 
     orb_histograms = np.zeros((X.shape[0], largest_descriptor_dim))
     for image_idx in range(len(descriptors)):
+        if descriptors[image_idx] is None:
+            continue
         for desc_value in descriptors[image_idx]:
             orb_histograms[image_idx, desc_value] += 1
     df[[f'orb_histogram_{i}' for i in range(largest_descriptor_dim)]] = orb_histograms

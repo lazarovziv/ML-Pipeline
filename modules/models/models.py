@@ -385,7 +385,7 @@ class ConvClassifier(nn.Module):
                 param.requires_grad = False
         
         # relu_slope = 0 is the same as regular relu
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU(relu_slope)
 
         self.blocks = [
             self.linear_block(240 * train_params['initial_out_channels'], 256),
